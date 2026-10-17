@@ -6,12 +6,12 @@ The UI source in this directory was initialized from
 
 The imported sources remain under their upstream [MIT License](LICENSE).
 
-The Hermes-specific layer is deliberately small:
+The Hermes-specific application layer replaces the imported runtime wiring:
 
-- `hermes_bridge.py` serves the static build and proxies Gateway's OpenAI API
-  on the same origin.
-- `vite.config.ts` provides equivalent development-time compatibility routes.
-- `ChatService` assigns the browser conversation a durable Hermes session and
-  memory key.
-- The browser-owned agentic loop is disabled, so Hermes Gateway remains the
-  only tool and approval execution owner.
+- `src/routes/(chat)/+page.svelte` uses Gateway's native session lifecycle,
+  session-stream SSE endpoint, and run-control endpoints.
+- `hermes_bridge.py` and `vite.config.ts` pass `/api/*`, `/v1/*`, and
+  `/health` through to Gateway on the same origin.
+- No llama.cpp endpoint, model-loader endpoint, or compatibility shim is used
+  at runtime. The remaining imported source files are retained only as the
+  visual/source foundation under their upstream license.

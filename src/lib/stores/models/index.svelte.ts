@@ -192,6 +192,12 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	get singleModelName(): string | null {
 		if (serverStore.isRouterMode) return null;
 
+		// Gateway's OpenAI-compatible model list is authoritative. The synthetic
+		// llama.cpp `/props` response is only a compatibility surface.
+		const listedModel = this.models[0]?.model;
+
+		if (listedModel) return listedModel;
+
 		const props = serverStore.props;
 
 		if (props?.model_alias) return props.model_alias;
@@ -378,6 +384,18 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	}
 
 	isModelLoaded(modelId: string): boolean {
+		// Hermes Gateway exposes an already-running agent through the standard
+		// model list. It is not a llama.cpp router, so there is no per-model
+		// loading state to query or change.
+		if (!serverStore.isRouterMode) {
+			return this.models.some(
+				(model) =>
+					model.id === modelId ||
+					model.model === modelId ||
+					model.aliases?.includes(modelId) === true
+			);
+		}
+
 		const status = this.getModelStatus(modelId);
 
 		return status === ServerModelStatus.LOADED || status === ServerModelStatus.SLEEPING;

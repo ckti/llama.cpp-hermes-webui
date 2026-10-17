@@ -350,6 +350,11 @@ export class ModelStatusManager {
 	}
 
 	async load(modelId: string): Promise<void> {
+		// Hermes Gateway is exposed to this imported UI as a single, already
+		// running model. `/models/load` belongs to llama.cpp router mode and
+		// must never be attempted for Hermes.
+		if (!serverStore.isRouterMode) return;
+
 		if (this.host.isModelLoaded(modelId)) return;
 
 		if (this.loadingStates.get(modelId)) return;
@@ -415,6 +420,8 @@ export class ModelStatusManager {
 	}
 
 	async unload(modelId: string): Promise<void> {
+		if (!serverStore.isRouterMode) return;
+
 		if (!this.host.isModelLoaded(modelId)) return;
 
 		if (this.loadingStates.get(modelId)) return;

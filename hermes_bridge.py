@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the standalone UI and proxy its Gateway API requests on the same origin."""
+"""Serve the Hermes UI and transparently proxy the native Hermes API."""
 
 from __future__ import annotations
 
@@ -29,88 +29,9 @@ HOP_BY_HOP_HEADERS = {
 MAX_REQUEST_BYTES = 10_000_000
 
 
-def hermes_gateway_props() -> dict[str, object]:
-    """Return the llama.cpp props shape the vendored UI needs to start."""
-    params = {
-        "backend_sampling": False,
-        "chat_format": "",
-        "dry_allowed_length": 2,
-        "dry_base": 1.75,
-        "dry_multiplier": 0,
-        "dry_penalty_last_n": -1,
-        "dry_sequence_breakers": [],
-        "dynatemp_exponent": 1,
-        "dynatemp_range": 0,
-        "frequency_penalty": 0,
-        "generation_prompt": "",
-        "grammar": "",
-        "grammar_lazy": False,
-        "grammar_triggers": [],
-        "ignore_eos": False,
-        "logit_bias": [],
-        "lora": [],
-        "max_tokens": -1,
-        "min_keep": 0,
-        "min_p": 0,
-        "mirostat": 0,
-        "mirostat_eta": 0.1,
-        "mirostat_tau": 5,
-        "n_discard": 0,
-        "n_keep": 0,
-        "n_predict": -1,
-        "n_probs": 0,
-        "post_sampling_probs": False,
-        "presence_penalty": 0,
-        "preserved_tokens": [],
-        "reasoning_format": "auto",
-        "reasoning_in_content": False,
-        "repeat_last_n": 64,
-        "repeat_penalty": 1,
-        "samplers": [],
-        "seed": -1,
-        "speculative.n_max": 16,
-        "speculative.n_min": 0,
-        "speculative.p_min": 0.75,
-        "stop": [],
-        "stream": True,
-        "temperature": 0.8,
-        "timings_per_token": False,
-        "top_k": 40,
-        "top_n_sigma": -1,
-        "top_p": 0.95,
-        "typ_p": 1,
-        "xtc_probability": 0,
-        "xtc_threshold": 0.1,
-    }
-    return {
-        "bos_token": "",
-        "build_info": "Hermes Gateway compatibility bridge",
-        "chat_template": "",
-        "default_generation_settings": {
-            "id": 0,
-            "id_task": 0,
-            "is_processing": False,
-            "n_ctx": 128000,
-            "next_token": {
-                "has_new_line": False,
-                "has_next_token": False,
-                "n_decoded": 0,
-                "n_remain": 0,
-                "stopping_word": "",
-            },
-            "params": params,
-            "prompt": "",
-            "speculative": False,
-        },
-        "eos_token": "",
-        "modalities": {"audio": False, "video": False, "vision": True},
-        "model_path": "Hermes Gateway",
-        "role": "model",
-        "total_slots": 1,
-    }
-
-
 class HermesBridgeHandler(BaseHTTPRequestHandler):
+    """Same-origin static server for the UI and pass-through for Hermes APIs."""
+
     protocol_version = "HTTP/1.1"
     gateway_url = ""
     static_dir = Path("dist")
@@ -125,9 +46,7 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         self._dispatch()
 
     def do_OPTIONS(self) -> None:
-        self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        self._dispatch()
 
     def do_POST(self) -> None:
         self._dispatch()
@@ -138,51 +57,20 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
     def _dispatch(self) -> None:
         path = urlsplit(self.path).path
 
-        if self.command == "GET" and path == "/props":
-            self._send_json(HTTPStatus.OK, hermes_gateway_props())
-            return
-
-        if self.command == "GET" and path == "/slots":
-            self._send_json(HTTPStatus.OK, [])
-            return
-
-        # llama.cpp's Web UI starts by probing this endpoint.  It must report
-        # unavailable: Hermes Gateway owns tool execution and approval rather
-        # than exposing llama.cpp's browser-side tools API.
-        if path == "/tools":
-            if not self._consume_request_body():
-                return
-            self._send_json(
-                HTTPStatus.FORBIDDEN,
-                {"error": {"message": "Tools are provided by Hermes Gateway, not this UI bridge."}},
-            )
-            return
-
-        if self.command == "POST" and path == "/v1/streams/lookup":
-            if not self._consume_request_body():
-                return
-            self._send_json(HTTPStatus.OK, [])
-            return
-
-        # These are llama.cpp router-model endpoints.  Hermes advertises its
-        # own model through /v1/models and cannot load or unload models from
-        # the browser.  Consume a possible JSON body before replying so the
-        # connection remains aligned for a subsequent request.
-        if path in {"/models/load", "/models/unload"}:
-            if not self._consume_request_body():
-                return
-            self._send_json(
-                HTTPStatus.METHOD_NOT_ALLOWED,
-                {"error": {"message": "Model loading is not provided by Hermes Gateway UI."}},
-            )
-            return
-
-        if path.startswith("/v1/"):
+        # The UI uses only documented Hermes Gateway endpoints. Keeping the
+        # proxy scoped prevents static-file requests from being forwarded.
+        if (
+            path == "/api"
+            or path.startswith("/api/")
+            or path == "/v1"
+            or path.startswith("/v1/")
+            or path == "/health"
+        ):
             self._proxy_gateway()
             return
 
         if self.command not in {"GET", "HEAD"}:
-            if not self._consume_request_body():
+            if not self._discard_request_body():
                 return
             self._send_json(
                 HTTPStatus.NOT_FOUND,
@@ -193,18 +81,9 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         self._serve_static(path)
 
     def _proxy_gateway(self) -> None:
-        body = None
-        content_length = self.headers.get("Content-Length")
-        if content_length:
-            try:
-                size = int(content_length)
-            except ValueError:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": {"message": "Invalid Content-Length"}})
-                return
-            if size < 0 or size > MAX_REQUEST_BYTES:
-                self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": {"message": "Request too large"}})
-                return
-            body = self.rfile.read(size)
+        body = self._read_request_body()
+        if body is None and self.headers.get("Content-Length"):
+            return
 
         headers = {
             name: value
@@ -224,43 +103,39 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
                 {"error": {"message": "Hermes Gateway is unavailable. Start it and check the bridge gateway URL."}},
             )
 
-    def _consume_request_body(self) -> bool:
-        """Discard a local compatibility route's request body safely.
-
-        ``BaseHTTPRequestHandler`` leaves unread bytes on the keep-alive
-        connection.  The Web UI sends JSON to a few llama.cpp-only routes; if
-        we reply before consuming it, those bytes are parsed as a second HTTP
-        request and produce misleading ``Bad HTTP/0.9 request`` log lines.
-        """
-        if self.command in {"GET", "HEAD", "OPTIONS"}:
-            return True
-
+    def _read_request_body(self) -> bytes | None:
         if self.headers.get("Transfer-Encoding"):
             self._send_json(
                 HTTPStatus.NOT_IMPLEMENTED,
                 {"error": {"message": "Chunked request bodies are not supported by this bridge."}},
             )
             self.close_connection = True
-            return False
+            return None
 
         content_length = self.headers.get("Content-Length")
         if not content_length:
-            return True
+            return None
 
         try:
             size = int(content_length)
         except ValueError:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": {"message": "Invalid Content-Length"}})
             self.close_connection = True
-            return False
+            return None
 
         if size < 0 or size > MAX_REQUEST_BYTES:
             self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": {"message": "Request too large"}})
             self.close_connection = True
-            return False
+            return None
 
-        self.rfile.read(size)
-        return True
+        return self.rfile.read(size)
+
+    def _discard_request_body(self) -> bool:
+        """Consume an unknown request so persistent HTTP connections stay aligned."""
+        if self.command in {"GET", "HEAD"}:
+            return True
+        body = self._read_request_body()
+        return body is not None or not self.headers.get("Content-Length")
 
     def _forward_response(self, status: int, headers: object, response: object) -> None:
         self.send_response(status)
