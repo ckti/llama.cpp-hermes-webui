@@ -9,11 +9,22 @@ and durable session history.
 
 - Node.js 20 or newer
 - A running Hermes Gateway API Server, normally at `http://127.0.0.1:8642`
-- Its API key, which the UI stores only in the browser's local storage
+- Its API key, which must be configured in Gateway and then entered into the
+  UI's Settings panel (the UI stores its copy only in browser local storage)
 
 Start Hermes Gateway with its API Server enabled and a strong `API_SERVER_KEY`.
-See `hermes-agent/website/docs/user-guide/features/api-server.md` for its
-configuration.
+For example:
+
+```bash
+hermes config set API_SERVER_ENABLED true
+hermes config set API_SERVER_KEY your-strong-secret
+hermes gateway stop && hermes gateway
+```
+
+The same `API_SERVER_KEY` value belongs in the UI Settings API-key field.
+Gateway must be restarted after changing it: the durable session and memory
+headers used by this UI are deliberately rejected when Gateway has no key.
+See `hermes-agent/website/docs/user-guide/features/api-server.md` for details.
 
 ## Development
 

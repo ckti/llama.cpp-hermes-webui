@@ -106,9 +106,10 @@ function hermesGatewayProps() {
 }
 
 function hermesGatewayCompatPlugin(): Plugin {
-	const json = (res: ServerResponse, body: unknown) => {
+	const json = (res: ServerResponse, body: unknown, statusCode = 200) => {
 		res.setHeader('Cache-Control', 'no-store');
 		res.setHeader('Content-Type', 'application/json; charset=utf-8');
+		res.statusCode = statusCode;
 		res.end(JSON.stringify(body));
 	};
 
@@ -123,17 +124,37 @@ function hermesGatewayCompatPlugin(): Plugin {
 					return;
 				}
 
-				if (
-					(req.method === 'GET' && pathname === '/slots') ||
-					(req.method === 'GET' && pathname === '/tools')
-				) {
+				if (req.method === 'GET' && pathname === '/slots') {
 					json(res, []);
 
 					return;
 				}
 
+				if (pathname === '/tools') {
+					req.resume();
+					json(
+						res,
+						{ error: { message: 'Tools are provided by Hermes Gateway, not this UI bridge.' } },
+						403
+					);
+
+					return;
+				}
+
 				if (req.method === 'POST' && pathname === '/v1/streams/lookup') {
+					req.resume();
 					json(res, []);
+
+					return;
+				}
+
+				if (pathname === '/models/load' || pathname === '/models/unload') {
+					req.resume();
+					json(
+						res,
+						{ error: { message: 'Model loading is not provided by Hermes Gateway UI.' } },
+						405
+					);
 
 					return;
 				}

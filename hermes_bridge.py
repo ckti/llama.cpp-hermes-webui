@@ -142,12 +142,39 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, hermes_gateway_props())
             return
 
-        if self.command == "GET" and path in {"/slots", "/tools"}:
+        if self.command == "GET" and path == "/slots":
             self._send_json(HTTPStatus.OK, [])
             return
 
+        # llama.cpp's Web UI starts by probing this endpoint.  It must report
+        # unavailable: Hermes Gateway owns tool execution and approval rather
+        # than exposing llama.cpp's browser-side tools API.
+        if path == "/tools":
+            if not self._consume_request_body():
+                return
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {"error": {"message": "Tools are provided by Hermes Gateway, not this UI bridge."}},
+            )
+            return
+
         if self.command == "POST" and path == "/v1/streams/lookup":
+            if not self._consume_request_body():
+                return
             self._send_json(HTTPStatus.OK, [])
+            return
+
+        # These are llama.cpp router-model endpoints.  Hermes advertises its
+        # own model through /v1/models and cannot load or unload models from
+        # the browser.  Consume a possible JSON body before replying so the
+        # connection remains aligned for a subsequent request.
+        if path in {"/models/load", "/models/unload"}:
+            if not self._consume_request_body():
+                return
+            self._send_json(
+                HTTPStatus.METHOD_NOT_ALLOWED,
+                {"error": {"message": "Model loading is not provided by Hermes Gateway UI."}},
+            )
             return
 
         if path.startswith("/v1/"):
@@ -155,6 +182,8 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
             return
 
         if self.command not in {"GET", "HEAD"}:
+            if not self._consume_request_body():
+                return
             self._send_json(
                 HTTPStatus.NOT_FOUND,
                 {"error": {"message": "Endpoint not provided by Hermes Gateway UI"}},
@@ -194,6 +223,44 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_GATEWAY,
                 {"error": {"message": "Hermes Gateway is unavailable. Start it and check the bridge gateway URL."}},
             )
+
+    def _consume_request_body(self) -> bool:
+        """Discard a local compatibility route's request body safely.
+
+        ``BaseHTTPRequestHandler`` leaves unread bytes on the keep-alive
+        connection.  The Web UI sends JSON to a few llama.cpp-only routes; if
+        we reply before consuming it, those bytes are parsed as a second HTTP
+        request and produce misleading ``Bad HTTP/0.9 request`` log lines.
+        """
+        if self.command in {"GET", "HEAD", "OPTIONS"}:
+            return True
+
+        if self.headers.get("Transfer-Encoding"):
+            self._send_json(
+                HTTPStatus.NOT_IMPLEMENTED,
+                {"error": {"message": "Chunked request bodies are not supported by this bridge."}},
+            )
+            self.close_connection = True
+            return False
+
+        content_length = self.headers.get("Content-Length")
+        if not content_length:
+            return True
+
+        try:
+            size = int(content_length)
+        except ValueError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": {"message": "Invalid Content-Length"}})
+            self.close_connection = True
+            return False
+
+        if size < 0 or size > MAX_REQUEST_BYTES:
+            self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": {"message": "Request too large"}})
+            self.close_connection = True
+            return False
+
+        self.rfile.read(size)
+        return True
 
     def _forward_response(self, status: int, headers: object, response: object) -> None:
         self.send_response(status)
