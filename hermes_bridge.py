@@ -26,6 +26,10 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+# The bridge is the browser-facing origin.  Forwarding the browser's Origin
+# header would make the upstream Gateway apply its direct-browser CORS policy
+# to an already same-origin request (and reject POSTs with a bare 403).
+UPSTREAM_EXCLUDED_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "host", "origin"}
 MAX_REQUEST_BYTES = 10_000_000
 
 
@@ -95,7 +99,7 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         headers = {
             name: value
             for name, value in self.headers.items()
-            if name.lower() not in HOP_BY_HOP_HEADERS | {"content-length", "host"}
+            if name.lower() not in UPSTREAM_EXCLUDED_HEADERS
         }
         request = Request(
             f"{self.gateway_url}{upstream_path if upstream_path is not None else self.path}",

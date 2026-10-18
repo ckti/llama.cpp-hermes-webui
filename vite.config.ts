@@ -10,7 +10,7 @@ import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 import { playwright } from '@vitest/browser-playwright';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
+import { defineConfig, loadEnv, searchForWorkspaceRoot, type ProxyOptions } from 'vite';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,6 +27,16 @@ const browserBaseConfig: any = {
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, process.cwd(), 'VITE_PUBLIC_');
 	const SERVER_ORIGIN = env.VITE_PUBLIC_HERMES_GATEWAY_ORIGIN || 'http://127.0.0.1:8642';
+	// The Vite proxy is the browser-facing origin. Do not forward its Origin
+	// header to Hermes or the Gateway's direct-browser CORS middleware will
+	// reject same-origin UI POSTs before their route handlers run.
+	const hermesProxy: ProxyOptions = {
+		changeOrigin: true,
+		configure: (proxy) => {
+			proxy.on('proxyReq', (request) => request.removeHeader('origin'));
+		},
+		target: SERVER_ORIGIN
+	};
 
 	return {
 		build: {
@@ -61,13 +71,12 @@ export default defineConfig(({ mode }) => {
 			},
 			proxy: {
 				'/__hermes_api': {
-					changeOrigin: true,
+					...hermesProxy,
 					rewrite: (path) => path.replace(/^\/__hermes_api/, ''),
-					target: SERVER_ORIGIN
 				},
-				'/api': SERVER_ORIGIN,
-				'/health': SERVER_ORIGIN,
-				'/v1': SERVER_ORIGIN
+				'/api': hermesProxy,
+				'/health': hermesProxy,
+				'/v1': hermesProxy
 			}
 		},
 
