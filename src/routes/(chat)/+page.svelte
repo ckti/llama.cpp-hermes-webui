@@ -30,11 +30,13 @@
 	type PendingApproval = {
 		runId: string;
 		requestId?: string;
+		executionGeneration?: number;
 		toolName?: string;
 		message?: string;
 	};
 
 	const apiKeyStorageKey = 'hermes-gateway-ui.api-key';
+	const sessionKeyStorageKey = 'hermes-gateway-ui.session-keys';
 
 	let apiKey = $state('');
 	let isConnected = $state(false);
@@ -50,6 +52,7 @@
 	let activeRunId = $state<string | null>(null);
 	let activity = $state<string[]>([]);
 	let pendingApproval = $state<PendingApproval | null>(null);
+	let sessionKeys = $state<Record<string, string>>({});
 	let streamController: AbortController | null = null;
 
 	let activeSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
@@ -96,13 +99,32 @@
 		return `Hermes Gateway request failed (${status}).`;
 	}
 
-	function headers(extra?: HeadersInit): Headers {
+	function createSessionKey(): string {
+		return `hermes-webui:${crypto.randomUUID()}`;
+	}
+
+	function sessionKeyFor(sessionId: string): string {
+		const existing = sessionKeys[sessionId];
+
+		if (existing) return existing;
+
+		const sessionKey = createSessionKey();
+
+		sessionKeys = { ...sessionKeys, [sessionId]: sessionKey };
+		localStorage.setItem(sessionKeyStorageKey, JSON.stringify(sessionKeys));
+
+		return sessionKey;
+	}
+
+	function headers(extra?: HeadersInit, sessionId?: string): Headers {
 		if (!apiKey.trim()) throw new Error('Enter the Hermes Gateway API key first.');
 
 		const result = new Headers(extra);
 
 		result.set('Authorization', `Bearer ${apiKey.trim()}`);
 		result.set('Accept', 'application/json');
+
+		if (sessionId) result.set('X-Hermes-Session-Key', sessionKeyFor(sessionId));
 
 		return result;
 	}
@@ -235,6 +257,7 @@
 			activeSessionId = created.id;
 			messages = [];
 			activity = [];
+			sessionKeyFor(created.id);
 
 			return created;
 		} catch (cause) {
@@ -319,6 +342,10 @@
 
 		if (eventName === 'approval.request') {
 			pendingApproval = {
+				executionGeneration:
+					typeof payload.execution_generation === 'number'
+						? payload.execution_generation
+						: undefined,
 				message: typeof payload.message === 'string' ? payload.message : undefined,
 				requestId: typeof payload.request_id === 'string' ? payload.request_id : undefined,
 				runId: runId ?? activeRunId ?? '',
@@ -332,11 +359,18 @@
 		if (
 			eventName === 'run.completed' ||
 			eventName === 'run.failed' ||
-			eventName === 'run.cancelled'
+			eventName === 'run.cancelled' ||
+			eventName === 'run.interrupted'
 		) {
 			activeRunId = null;
 
 			if (eventName !== 'run.completed') appendActivity(`Run ${eventName.slice(4)}.`);
+
+			return;
+		}
+
+		if (eventName === 'error' && typeof payload.message === 'string') {
+			error = payload.message;
 		}
 	}
 
@@ -399,7 +433,10 @@
 
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/chat/stream`, {
 				body: JSON.stringify(body),
-				headers: { ...Object.fromEntries(headers()), 'Content-Type': 'application/json' },
+				headers: {
+					...Object.fromEntries(headers(undefined, sessionId)),
+					'Content-Type': 'application/json'
+				},
 				method: 'POST',
 				signal: streamController.signal
 			});
@@ -472,9 +509,15 @@
 		if (!pendingApproval?.runId) return;
 
 		try {
-			const body: { choice: string; request_id?: string } = { choice };
+			const body: { choice: string; execution_generation?: number; request_id?: string } = {
+				choice
+			};
 
 			if (pendingApproval.requestId) body.request_id = pendingApproval.requestId;
+
+			if (pendingApproval.executionGeneration !== undefined) {
+				body.execution_generation = pendingApproval.executionGeneration;
+			}
 
 			await api(`/v1/runs/${encodeURIComponent(pendingApproval.runId)}/approval`, {
 				body: JSON.stringify(body),
@@ -518,6 +561,10 @@
 		try {
 			await api(`/api/sessions/${encodeURIComponent(deletingId)}`, { method: 'DELETE' });
 			sessions = sessions.filter((session) => session.id !== deletingId);
+			const { [deletingId]: _removed, ...remainingSessionKeys } = sessionKeys;
+
+			sessionKeys = remainingSessionKeys;
+			localStorage.setItem(sessionKeyStorageKey, JSON.stringify(sessionKeys));
 			activeSessionId = null;
 			messages = [];
 			activity = [];
@@ -528,6 +575,19 @@
 
 	onMount(() => {
 		apiKey = localStorage.getItem(apiKeyStorageKey) ?? '';
+		try {
+			const stored = JSON.parse(localStorage.getItem(sessionKeyStorageKey) ?? '{}');
+
+			if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+				const validEntries = Object.entries(stored).filter(
+					(entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0
+				);
+
+				sessionKeys = Object.fromEntries(validEntries);
+			}
+		} catch {
+			localStorage.removeItem(sessionKeyStorageKey);
+		}
 	});
 </script>
 

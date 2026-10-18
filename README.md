@@ -67,4 +67,8 @@ The browser calls documented Hermes endpoints only:
 store, or log the API key. Branching uses Hermes's native session fork and
 therefore ends the source session, as documented by the Gateway API.
 
+For each native chat session, the UI also creates an opaque local
+`X-Hermes-Session-Key`. This is distinct from the transcript session ID and
+gives Hermes a stable, isolated scope for long-term memory in that chat.
+
 See [UPSTREAM.md](UPSTREAM.md) for the imported source revision.
