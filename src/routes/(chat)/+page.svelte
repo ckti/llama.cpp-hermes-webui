@@ -35,6 +35,21 @@
 		message?: string;
 	};
 
+	type ModelChoice = {
+		id: string;
+		model: string;
+		provider: string;
+		providerName: string;
+	};
+
+	type HermesModelProvider = {
+		authenticated?: boolean;
+		is_current?: boolean;
+		models?: unknown[];
+		name?: string;
+		slug?: string;
+	};
+
 	const apiKeyStorageKey = 'hermes-gateway-ui.api-key';
 	const sessionKeyStorageKey = 'hermes-gateway-ui.session-keys';
 
@@ -45,8 +60,8 @@
 	let sessions = $state<HermesSession[]>([]);
 	let activeSessionId = $state<string | null>(null);
 	let messages = $state<DisplayMessage[]>([]);
-	let models = $state<string[]>([]);
-	let selectedModel = $state('');
+	let modelChoices = $state<ModelChoice[]>([]);
+	let selectedModelId = $state('');
 	let prompt = $state('');
 	let isStreaming = $state(false);
 	let activeRunId = $state<string | null>(null);
@@ -56,6 +71,9 @@
 	let streamController: AbortController | null = null;
 
 	let activeSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
+	let selectedModel = $derived(
+		modelChoices.find((choice) => choice.id === selectedModelId) ?? null
+	);
 
 	function contentText(content: unknown): string {
 		if (typeof content === 'string') return content;
@@ -193,6 +211,59 @@
 		});
 	}
 
+	function modelChoicesFromResponse(response: {
+		providers?: HermesModelProvider[];
+	}): ModelChoice[] {
+		const currentProviderFirst = [...(response.providers ?? [])].sort(
+			(left, right) => Number(Boolean(right.is_current)) - Number(Boolean(left.is_current))
+		);
+
+		return currentProviderFirst.flatMap((provider) => {
+			const providerSlug = provider.slug;
+
+			if (!providerSlug || provider.authenticated === false || !Array.isArray(provider.models)) {
+				return [];
+			}
+
+			return provider.models.flatMap((entry) => {
+				const model =
+					typeof entry === 'string'
+						? entry
+						: entry &&
+							  typeof entry === 'object' &&
+							  typeof (entry as { id?: unknown }).id === 'string'
+							? (entry as { id: string }).id
+							: '';
+
+				if (!model) return [];
+
+				return [
+					{
+						id: `${providerSlug}::${model}`,
+						model,
+						provider: providerSlug,
+						providerName: provider.name || providerSlug
+					}
+				];
+			});
+		});
+	}
+
+	async function loadModelOptions(refresh = false): Promise<void> {
+		const suffix = refresh
+			? '?include_unconfigured=false&refresh=1'
+			: '?include_unconfigured=false';
+		const response = await api<{ providers?: HermesModelProvider[] }>(
+			`/api/model/options${suffix}`
+		);
+
+		modelChoices = modelChoicesFromResponse(response);
+
+		if (!modelChoices.some((choice) => choice.id === selectedModelId)) {
+			selectedModelId = modelChoices[0]?.id ?? '';
+		}
+	}
+
 	async function refreshSessions(): Promise<void> {
 		const response = await api<unknown>('/api/sessions?limit=100');
 
@@ -211,10 +282,7 @@
 		isConnecting = true;
 		error = '';
 		try {
-			const [capabilities, modelsResponse] = await Promise.all([
-				api<{ features?: Record<string, boolean> }>('/v1/capabilities'),
-				api<{ data?: Array<{ id?: string }> }>('/v1/models')
-			]);
+			const capabilities = await api<{ features?: Record<string, boolean> }>('/v1/capabilities');
 
 			if (capabilities.features?.session_chat_streaming === false) {
 				throw new Error(
@@ -222,13 +290,7 @@
 				);
 			}
 
-			models = (modelsResponse.data ?? [])
-				.map((model) => model.id)
-				.filter((model): model is string => Boolean(model));
-
-			if (!selectedModel && models.length) selectedModel = models[0];
-
-			await refreshSessions();
+			await Promise.all([loadModelOptions(), refreshSessions()]);
 			isConnected = true;
 			localStorage.setItem(apiKeyStorageKey, apiKey.trim());
 		} catch (cause) {
@@ -244,7 +306,10 @@
 		try {
 			const body: Record<string, string> = { source: 'hermes_gateway_ui', title: 'New chat' };
 
-			if (selectedModel) body.model = selectedModel;
+			if (selectedModel) {
+				body.model = selectedModel.model;
+				body.provider = selectedModel.provider;
+			}
 
 			const created = sessionFromResponse(
 				await api<unknown>('/api/sessions', {
@@ -429,7 +494,10 @@
 		try {
 			const body: Record<string, string> = { input };
 
-			if (selectedModel) body.model = selectedModel;
+			if (selectedModel) {
+				body.model = selectedModel.model;
+				body.provider = selectedModel.provider;
+			}
 
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/chat/stream`, {
 				body: JSON.stringify(body),
@@ -649,7 +717,7 @@
 
 					<p class="mt-4 text-sm opacity-60">
 						This UI calls Hermes endpoints directly: <code>/v1/capabilities</code>,
-						<code>/v1/models</code>, and <code>/api/sessions</code>.
+						<code>/api/model/options</code>, and <code>/api/sessions</code>.
 					</p>
 				</div>
 			</section>
@@ -711,14 +779,24 @@
 						</div>
 
 						<select
-							bind:value={selectedModel}
+							bind:value={selectedModelId}
 							aria-label="Model"
 							class="select select-bordered select-sm max-w-56"
 						>
-							{#if !models.length}<option value="">Hermes default model</option>{/if}
+							<option value="">Hermes default model</option>
 
-							{#each models as model (model)}<option value={model}>{model}</option>{/each}
+							{#each modelChoices as choice (choice.id)}
+								<option value={choice.id}>{choice.providerName} · {choice.model}</option>
+							{/each}
 						</select>
+
+						<button
+							aria-label="Refresh model options"
+							class="btn btn-ghost btn-sm"
+							disabled={isStreaming}
+							onclick={() => loadModelOptions(true).catch((cause) => (error = cause.message))}
+							>Models</button
+						>
 
 						{#if activeSession}
 							<button class="btn btn-ghost btn-sm" disabled={isStreaming} onclick={forkSession}

@@ -56,7 +56,7 @@ trusted authentication and TLS layer in front of it.
 
 The browser calls documented Hermes endpoints only:
 
-- `GET /v1/capabilities` and `GET /v1/models` during connection.
+- `GET /v1/capabilities` and `GET /api/model/options` during connection.
 - `GET`, `POST`, `DELETE`, and `POST /fork` under `/api/sessions` for durable
   conversations and their saved transcripts.
 - `POST /api/sessions/{id}/chat/stream` for Server-Sent Event chat streaming.
