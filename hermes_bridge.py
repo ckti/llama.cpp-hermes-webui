@@ -57,6 +57,13 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
     def _dispatch(self) -> None:
         path = urlsplit(self.path).path
 
+        # The OpenAPI explorer uses this prefix to invoke every operation the
+        # configured Gateway advertises, including routes outside /api and /v1.
+        if path == "/__hermes_api" or path.startswith("/__hermes_api/"):
+            upstream_path = self.path.removeprefix("/__hermes_api") or "/"
+            self._proxy_gateway(upstream_path)
+            return
+
         # The UI uses only documented Hermes Gateway endpoints. Keeping the
         # proxy scoped prevents static-file requests from being forwarded.
         if (
@@ -80,7 +87,7 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
 
         self._serve_static(path)
 
-    def _proxy_gateway(self) -> None:
+    def _proxy_gateway(self, upstream_path: str | None = None) -> None:
         body = self._read_request_body()
         if body is None and self.headers.get("Content-Length"):
             return
@@ -90,7 +97,12 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
             for name, value in self.headers.items()
             if name.lower() not in HOP_BY_HOP_HEADERS | {"content-length", "host"}
         }
-        request = Request(f"{self.gateway_url}{self.path}", data=body, headers=headers, method=self.command)
+        request = Request(
+            f"{self.gateway_url}{upstream_path if upstream_path is not None else self.path}",
+            data=body,
+            headers=headers,
+            method=self.command,
+        )
 
         try:
             with urlopen(request, timeout=660) as response:

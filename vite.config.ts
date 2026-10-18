@@ -60,6 +60,11 @@ export default defineConfig(({ mode }) => {
 				'Cross-Origin-Opener-Policy': 'same-origin'
 			},
 			proxy: {
+				'/__hermes_api': {
+					changeOrigin: true,
+					rewrite: (path) => path.replace(/^\/__hermes_api/, ''),
+					target: SERVER_ORIGIN
+				},
 				'/api': SERVER_ORIGIN,
 				'/health': SERVER_ORIGIN,
 				'/v1': SERVER_ORIGIN

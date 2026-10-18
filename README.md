@@ -67,6 +67,14 @@ The browser calls documented Hermes endpoints only:
 store, or log the API key. Branching uses Hermes's native session fork and
 therefore ends the source session, as documented by the Gateway API.
 
+The **API Explorer** (open `#/api`) loads the connected Gateway's
+`/openapi.json` contract and renders every operation it currently advertises,
+including its path, query, and header parameters plus declared request body.
+Its requests are sent through an isolated `/__hermes_api/*` bridge prefix,
+which is stripped before Gateway receives them. This keeps the explorer in
+sync with the specific Hermes version running behind the UI rather than
+hard-coding a partial endpoint list.
+
 For each native chat session, the UI also creates an opaque local
 `X-Hermes-Session-Key`. This is distinct from the transcript session ID and
 gives Hermes a stable, isolated scope for long-term memory in that chat.

@@ -10,8 +10,11 @@ The Hermes-specific application layer replaces the imported runtime wiring:
 
 - `src/routes/(chat)/+page.svelte` uses Gateway's native session lifecycle,
   session-stream SSE endpoint, and run-control endpoints.
+- `src/routes/api/+page.svelte` dynamically renders every operation from the
+  connected Gateway's `/openapi.json` contract.
 - `hermes_bridge.py` and `vite.config.ts` pass `/api/*`, `/v1/*`, and
-  `/health` through to Gateway on the same origin.
+  `/health` through to Gateway on the same origin; their `/__hermes_api/*`
+  prefix exposes the full contract to the API Explorer.
 - No llama.cpp endpoint, model-loader endpoint, or compatibility shim is used
   at runtime. The remaining imported source files are retained only as the
   visual/source foundation under their upstream license.

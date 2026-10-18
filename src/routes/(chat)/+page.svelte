@@ -676,6 +676,8 @@
 				<p class="text-sm opacity-65">Native sessions, streaming runs, tools, and approvals.</p>
 			</div>
 
+			<a class="btn btn-ghost" href="#/api">API Explorer</a>
+
 			<form
 				class="flex w-full flex-col gap-2 sm:flex-row lg:w-auto"
 				onsubmit={(event) => {
