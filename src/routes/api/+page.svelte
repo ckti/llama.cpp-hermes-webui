@@ -51,6 +51,7 @@
 
 	type ApiOperation = {
 		bodyContentType?: string;
+		bodyExample?: unknown;
 		bodySchema?: OpenApiSchema;
 		description?: string;
 		id: string;
@@ -59,10 +60,258 @@
 		path: string;
 		summary: string;
 		tags: string[];
+		transport?: 'http' | 'websocket';
 	};
 
 	const apiKeyStorageKey = 'hermes-gateway-ui.api-key';
 	const methods = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put']);
+
+	function documentedParameter(
+		name: string,
+		location: OpenApiParameter['in'],
+		example = '',
+		required = true,
+		description?: string
+	): OpenApiParameter {
+		return { description, example, in: location, name, required, schema: { type: 'string' } };
+	}
+
+	function documentedOperation(
+		method: string,
+		path: string,
+		summary: string,
+		options: {
+			bodyExample?: unknown;
+			description?: string;
+			parameters?: OpenApiParameter[];
+			tags?: string[];
+			transport?: 'http' | 'websocket';
+		} = {}
+	): ApiOperation {
+		return {
+			bodyContentType: options.bodyExample === undefined ? undefined : 'application/json',
+			bodyExample: options.bodyExample,
+			description: options.description,
+			id: `official:${method}:${path}`,
+			method,
+			parameters: options.parameters ?? [],
+			path,
+			summary,
+			tags: options.tags ?? ['Official API'],
+			transport: options.transport ?? 'http'
+		};
+	}
+
+	// The official API-server documentation is a usable fallback for Gateway
+	// releases that do not publish an OpenAPI document (including the current
+	// aiohttp implementation). The live capability document adds version-specific
+	// extension routes after this documented baseline.
+	const officialHermesOperations: ApiOperation[] = [
+		documentedOperation('get', '/health', 'Gateway liveness', {
+			description: 'Cheap public liveness probe.',
+			tags: ['Health']
+		}),
+		documentedOperation('get', '/v1/health', 'OpenAI-compatible liveness', {
+			tags: ['Health']
+		}),
+		documentedOperation('get', '/health/detailed', 'Gateway readiness', {
+			description: 'Authenticated readiness and dependency status.',
+			tags: ['Health']
+		}),
+		documentedOperation('post', '/v1/chat/completions', 'Chat completion', {
+			bodyExample: {
+				messages: [{ content: 'Hello from Hermes.', role: 'user' }],
+				model: 'hermes-agent',
+				stream: false
+			},
+			parameters: [
+				documentedParameter('Idempotency-Key', 'header', '', false),
+				documentedParameter('X-Hermes-Session-Id', 'header', '', false),
+				documentedParameter('X-Hermes-Session-Key', 'header', '', false)
+			],
+			tags: ['OpenAI compatibility']
+		}),
+		documentedOperation('post', '/v1/responses', 'Response API turn', {
+			bodyExample: { input: 'Hello from Hermes.', model: 'hermes-agent' },
+			parameters: [
+				documentedParameter('Idempotency-Key', 'header', '', false),
+				documentedParameter('X-Hermes-Session-Id', 'header', '', false),
+				documentedParameter('X-Hermes-Session-Key', 'header', '', false)
+			],
+			tags: ['OpenAI compatibility']
+		}),
+		documentedOperation('get', '/v1/responses/{response_id}', 'Get stored response', {
+			parameters: [documentedParameter('response_id', 'path', 'resp_example')],
+			tags: ['OpenAI compatibility']
+		}),
+		documentedOperation('delete', '/v1/responses/{response_id}', 'Delete stored response', {
+			parameters: [documentedParameter('response_id', 'path', 'resp_example')],
+			tags: ['OpenAI compatibility']
+		}),
+		documentedOperation('get', '/v1/models', 'List OpenAI-compatible models', {
+			tags: ['OpenAI compatibility']
+		}),
+		documentedOperation('get', '/api/model/options', 'List Hermes model options', {
+			description: 'Provider-aware model picker inventory. refresh=1 re-probes saved providers.',
+			parameters: [
+				documentedParameter('refresh', 'query', 'false', false),
+				documentedParameter('include_unconfigured', 'query', 'false', false)
+			],
+			tags: ['Discovery']
+		}),
+		documentedOperation('get', '/v1/capabilities', 'Discover Gateway capabilities', {
+			tags: ['Discovery']
+		}),
+		documentedOperation('get', '/v1/skills', 'List skills', { tags: ['Discovery'] }),
+		documentedOperation('get', '/v1/toolsets', 'List toolsets', { tags: ['Discovery'] }),
+		documentedOperation('post', '/v1/browser-control/register', 'Register browser controller', {
+			bodyExample: {
+				browser_profile_id: 'default',
+				capabilities: ['browser_navigate'],
+				controller_id: 'browser-controller-1',
+				protocol_version: 1,
+				session_id: 'session_id'
+			},
+			tags: ['Browser control']
+		}),
+		documentedOperation('get', '/v1/browser-control/ws', 'Browser controller WebSocket', {
+			description:
+				'WebSocket upgrade using the hermes-browser-control-v1 and one-time ticket subprotocols.',
+			tags: ['Browser control'],
+			transport: 'websocket'
+		}),
+		documentedOperation('post', '/v1/runs', 'Start agent run', {
+			bodyExample: { input: 'Hello from Hermes.' },
+			parameters: [
+				documentedParameter('Idempotency-Key', 'header', '', false),
+				documentedParameter('X-Hermes-Session-Key', 'header', '', false)
+			],
+			tags: ['Runs']
+		}),
+		documentedOperation('get', '/v1/runs/{run_id}', 'Get run status', {
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('get', '/v1/runs/{run_id}/events', 'Stream run events', {
+			description: 'Server-Sent Event stream.',
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('post', '/v1/runs/{run_id}/resolve-unknown', 'Resolve unknown run', {
+			bodyExample: { admission_id: 'adm_example', execution_generation: 1 },
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('post', '/v1/runs/{run_id}/stop', 'Stop run', {
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('post', '/v1/runs/{run_id}/approval', 'Respond to approval', {
+			bodyExample: { choice: 'once', execution_generation: 1, request_id: 'request_id' },
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('post', '/v1/runs/{run_id}/clarify', 'Respond to clarification', {
+			bodyExample: {
+				answer: 'The requested clarification.',
+				execution_generation: 1,
+				request_id: 'request_id'
+			},
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('post', '/v1/runs/{run_id}/steer', 'Steer active run', {
+			bodyExample: { input: 'Focus on the tests first.' },
+			parameters: [documentedParameter('run_id', 'path', 'run_example')],
+			tags: ['Runs']
+		}),
+		documentedOperation('get', '/api/jobs', 'List scheduled jobs', { tags: ['Jobs'] }),
+		documentedOperation('post', '/api/jobs', 'Create scheduled job', {
+			bodyExample: {
+				name: 'Example job',
+				prompt: 'Summarize the latest project activity.',
+				schedule: '0 9 * * *'
+			},
+			tags: ['Jobs']
+		}),
+		documentedOperation('get', '/api/jobs/{job_id}', 'Get scheduled job', {
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('patch', '/api/jobs/{job_id}', 'Update scheduled job', {
+			bodyExample: { schedule: '0 10 * * *' },
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('delete', '/api/jobs/{job_id}', 'Delete scheduled job', {
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('post', '/api/jobs/{job_id}/pause', 'Pause scheduled job', {
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('post', '/api/jobs/{job_id}/resume', 'Resume scheduled job', {
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('post', '/api/jobs/{job_id}/run', 'Run scheduled job', {
+			bodyExample: { prompt: 'Use this optional one-off context.' },
+			parameters: [documentedParameter('job_id', 'path', 'job_id')],
+			tags: ['Jobs']
+		}),
+		documentedOperation('get', '/api/sessions', 'List sessions', {
+			parameters: [
+				documentedParameter('limit', 'query', '50', false),
+				documentedParameter('offset', 'query', '0', false),
+				documentedParameter('source', 'query', '', false),
+				documentedParameter('include_children', 'query', 'false', false)
+			],
+			tags: ['Sessions']
+		}),
+		documentedOperation('post', '/api/sessions', 'Create session', {
+			bodyExample: { source: 'hermes_gateway_ui', title: 'New session' },
+			tags: ['Sessions']
+		}),
+		documentedOperation('get', '/api/sessions/{session_id}', 'Get session', {
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		}),
+		documentedOperation('patch', '/api/sessions/{session_id}', 'Update session', {
+			bodyExample: { title: 'Renamed session' },
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		}),
+		documentedOperation('delete', '/api/sessions/{session_id}', 'Delete session', {
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		}),
+		documentedOperation('get', '/api/sessions/{session_id}/messages', 'Get session messages', {
+			parameters: [
+				documentedParameter('session_id', 'path', 'session_id'),
+				documentedParameter('limit', 'query', '50', false),
+				documentedParameter('offset', 'query', '0', false),
+				documentedParameter('order', 'query', 'oldest', false),
+				documentedParameter('include_compacted', 'query', 'false', false)
+			],
+			tags: ['Sessions']
+		}),
+		documentedOperation('post', '/api/sessions/{session_id}/fork', 'Fork session', {
+			bodyExample: { title: 'Branch' },
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		}),
+		documentedOperation('post', '/api/sessions/{session_id}/chat', 'Run session chat', {
+			bodyExample: { input: 'Hello from Hermes.' },
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		}),
+		documentedOperation('post', '/api/sessions/{session_id}/chat/stream', 'Stream session chat', {
+			bodyExample: { input: 'Hello from Hermes.' },
+			parameters: [documentedParameter('session_id', 'path', 'session_id')],
+			tags: ['Sessions']
+		})
+	];
 
 	let apiKey = $state('');
 	let document = $state<OpenApiDocument | null>(null);
@@ -76,6 +325,7 @@
 	let isSending = $state(false);
 	let error = $state('');
 	let search = $state('');
+	let contractSource = $state('');
 
 	let selectedOperation = $derived(
 		operations.find((operation) => operation.id === selectedOperationId) ?? null
@@ -195,6 +445,55 @@
 		});
 	}
 
+	function operationsFromCapabilities(payload: unknown): ApiOperation[] {
+		if (!payload || typeof payload !== 'object') return [];
+
+		const endpoints = (payload as { endpoints?: unknown }).endpoints;
+
+		if (!endpoints || typeof endpoints !== 'object') return [];
+
+		return Object.entries(endpoints).flatMap(([name, endpoint]) => {
+			if (!endpoint || typeof endpoint !== 'object') return [];
+
+			const { method, path } = endpoint as { method?: unknown; path?: unknown };
+
+			if (typeof method !== 'string' || typeof path !== 'string') return [];
+
+			const normalizedMethod = method.toLowerCase();
+
+			if (!methods.has(normalizedMethod)) return [];
+
+			const parameters = [...path.matchAll(/\{([^}]+)\}/g)].map((match) =>
+				documentedParameter(match[1], 'path', match[1])
+			);
+
+			return [
+				{
+					id: `capability:${normalizedMethod}:${path}`,
+					method: normalizedMethod,
+					parameters,
+					path,
+					summary: name.replaceAll('_', ' '),
+					tags: ['Connected Gateway']
+				}
+			];
+		});
+	}
+
+	function mergeOperations(...operationLists: ApiOperation[][]): ApiOperation[] {
+		const seen: Record<string, true> = {};
+
+		return operationLists.flat().filter((operation) => {
+			const key = `${operation.method}:${operation.path}`;
+
+			if (seen[key]) return false;
+
+			seen[key] = true;
+
+			return true;
+		});
+	}
+
 	function selectOperation(operation: ApiOperation): void {
 		selectedOperationId = operation.id;
 		responseBody = '';
@@ -209,7 +508,9 @@
 				])
 		);
 
-		if (operation.bodySchema) {
+		if (operation.bodyExample !== undefined) {
+			requestBody = JSON.stringify(operation.bodyExample, null, 2);
+		} else if (operation.bodySchema) {
 			requestBody = JSON.stringify(sampleForSchema(operation.bodySchema), null, 2);
 		} else {
 			requestBody = '';
@@ -222,11 +523,33 @@
 		try {
 			const response = await fetch(endpoint('/openapi.json'), { headers: apiHeaders() });
 
-			if (!response.ok)
-				throw new Error(`Could not load OpenAPI specification (${response.status}).`);
+			if (response.ok) {
+				document = (await response.json()) as OpenApiDocument;
+				operations = operationsFromDocument(document);
+				contractSource = 'Loaded from the connected Gateway OpenAPI contract.';
+			} else if (response.status === 404) {
+				const capabilitiesResponse = await fetch(endpoint('/v1/capabilities'), {
+					headers: apiHeaders()
+				});
 
-			document = (await response.json()) as OpenApiDocument;
-			operations = operationsFromDocument(document);
+				if (!capabilitiesResponse.ok) {
+					throw new Error(
+						`Could not load Gateway capabilities (${capabilitiesResponse.status}) after OpenAPI was unavailable.`
+					);
+				}
+
+				const capabilities = await capabilitiesResponse.json();
+
+				document = { info: { title: 'Hermes API Server', version: 'built-in contract' } };
+				operations = mergeOperations(
+					officialHermesOperations,
+					operationsFromCapabilities(capabilities)
+				);
+				contractSource =
+					'OpenAPI is not exposed by this Gateway; using the official Hermes contract plus its live capabilities.';
+			} else {
+				throw new Error(`Could not load OpenAPI specification (${response.status}).`);
+			}
 
 			if (!operations.length)
 				throw new Error('The server OpenAPI specification did not declare any operations.');
@@ -236,6 +559,7 @@
 		} catch (cause) {
 			document = null;
 			operations = [];
+			contractSource = '';
 			error = cause instanceof Error ? cause.message : 'Could not load the OpenAPI specification.';
 		} finally {
 			isLoading = false;
@@ -302,6 +626,13 @@
 
 	async function sendRequest(): Promise<void> {
 		if (!selectedOperation) return;
+
+		if (selectedOperation.transport === 'websocket') {
+			error =
+				'This operation is a WebSocket controller endpoint. Register a controller first, then connect with its one-time ticket in Sec-WebSocket-Protocol.';
+
+			return;
+		}
 
 		isSending = true;
 		error = '';
@@ -370,7 +701,7 @@
 				<h1 class="text-xl font-semibold">Hermes API Explorer</h1>
 
 				<p class="text-sm opacity-65">
-					Every operation advertised by the connected Gateway’s OpenAPI contract.
+					Official Hermes operations plus the connected Gateway’s live capabilities.
 				</p>
 			</div>
 
@@ -405,8 +736,11 @@
 					<h2 class="text-lg font-semibold">Load the Gateway contract</h2>
 
 					<p class="mt-2 leading-6 opacity-75">
-						Enter the same API-server key used for chat, then load <code>/openapi.json</code>. The
-						explorer will render every endpoint that this Hermes instance actually advertises.
+						Enter the same API-server key used for chat. The explorer loads <code
+							>/openapi.json</code
+						>
+						when the Gateway provides it; otherwise it uses the official Hermes API contract and merges
+						in this Gateway’s <code>/v1/capabilities</code> routes.
 					</p>
 				</div>
 			</section>
@@ -419,6 +753,8 @@
 						{document.info?.title || 'OpenAPI'}
 						{document.info?.version ? `· ${document.info.version}` : ''} · {operations.length} operations
 					</p>
+
+					<p class="mb-2 text-xs opacity-60">{contractSource}</p>
 
 					<input
 						bind:value={search}
@@ -500,8 +836,15 @@
 						</div>
 
 						<div class="flex items-center gap-3 border-t border-base-300 p-4">
-							<button class="btn btn-primary" disabled={isSending} onclick={sendRequest}
-								>{isSending ? 'Sending…' : `Send ${selectedOperation.method.toUpperCase()}`}</button
+							<button
+								class="btn btn-primary"
+								disabled={isSending || selectedOperation.transport === 'websocket'}
+								onclick={sendRequest}
+								>{selectedOperation.transport === 'websocket'
+									? 'WebSocket endpoint'
+									: isSending
+										? 'Sending…'
+										: `Send ${selectedOperation.method.toUpperCase()}`}</button
 							>
 
 							{#if responseStatus}<span

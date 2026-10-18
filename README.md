@@ -68,12 +68,13 @@ store, or log the API key. Branching uses Hermes's native session fork and
 therefore ends the source session, as documented by the Gateway API.
 
 The **API Explorer** (open `#/api`) loads the connected Gateway's
-`/openapi.json` contract and renders every operation it currently advertises,
-including its path, query, and header parameters plus declared request body.
-Its requests are sent through an isolated `/__hermes_api/*` bridge prefix,
-which is stripped before Gateway receives them. This keeps the explorer in
-sync with the specific Hermes version running behind the UI rather than
-hard-coding a partial endpoint list.
+`/openapi.json` contract when it is available. Gateways that do not publish
+OpenAPI fall back to the official Hermes API contract—chat, responses, runs,
+browser control, jobs, sessions, health, model discovery, and skills/toolsets—
+then merge the connected Gateway's `/v1/capabilities` routes. It renders path,
+query, and header parameters plus declared request bodies. Its requests are
+sent through an isolated `/__hermes_api/*` bridge prefix, which is stripped
+before Gateway receives them.
 
 For each native chat session, the UI also creates an opaque local
 `X-Hermes-Session-Key`. This is distinct from the transcript session ID and
