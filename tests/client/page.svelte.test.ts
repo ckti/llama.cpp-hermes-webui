@@ -66,7 +66,7 @@ describe('/+page.svelte', () => {
 
 		await screen.getByPlaceholder('Hermes API key').fill('test-api-key');
 		await screen.getByRole('button', { name: 'Connect' }).click();
-		const newChatButton = screen.getByRole('button', { name: 'New chat', exact: true });
+		const newChatButton = screen.getByRole('button', { exact: true, name: 'New chat' });
 
 		await expect.element(newChatButton).toBeVisible();
 
@@ -87,6 +87,8 @@ describe('/+page.svelte', () => {
 		await screen.getByPlaceholder('Hermes API key').fill('test-api-key');
 		await screen.getByRole('button', { name: 'Connect' }).click();
 		await expect.element(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+		await screen.getByRole('button', { name: 'Attach files' }).click();
+		await expect.element(screen.getByLabelText('Choose files or drop them here')).toBeVisible();
 
 		const input = screen.container.querySelector('input[type="file"]');
 

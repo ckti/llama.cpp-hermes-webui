@@ -130,6 +130,7 @@
 	let sessionKeys = $state<Record<string, string>>({});
 	let pendingAttachments = $state<PendingAttachment[]>([]);
 	let isAddingAttachments = $state(false);
+	let showAttachmentPicker = $state(false);
 	let streamController: AbortController | null = null;
 
 	let activeSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
@@ -216,24 +217,6 @@
 					: reject(new Error(`Could not read ${file.name}.`));
 			reader.readAsDataURL(file);
 		});
-	}
-
-	function openAttachmentPicker(): void {
-		const input = document.getElementById('chat-attachment-input');
-
-		if (!(input instanceof HTMLInputElement)) return;
-
-		try {
-			if (typeof input.showPicker === 'function') {
-				input.showPicker();
-
-				return;
-			}
-		} catch {
-			// Older browsers can reject showPicker(), but still allow an input click.
-		}
-
-		input.click();
 	}
 
 	async function addAttachments(files: File[]): Promise<void> {
@@ -1129,6 +1112,54 @@
 							sendMessage();
 						}}
 					>
+						<div
+							aria-label="Add attachments"
+							class="rounded-lg border border-dashed border-border bg-muted/40 p-3"
+							hidden={!showAttachmentPicker}
+							id="chat-attachment-picker"
+							ondragover={(event) => {
+								event.preventDefault();
+
+								if (event.dataTransfer) {
+									event.dataTransfer.dropEffect =
+										isStreaming || isAddingAttachments ? 'none' : 'copy';
+								}
+							}}
+							ondrop={(event) => {
+								event.preventDefault();
+								void addAttachments(Array.from(event.dataTransfer?.files ?? []));
+							}}
+							role="region"
+						>
+							<label class="mb-2 block text-sm font-medium" for="chat-attachment-input">
+								Choose files or drop them here
+							</label>
+
+							<input
+								accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.css,.csv,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.txt,.xml,.yaml,.yml,.zsh"
+								aria-describedby="chat-attachment-help"
+								class="block w-full min-w-0 rounded-md border border-border bg-background p-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-border file:bg-secondary file:px-3 file:py-2 file:text-secondary-foreground hover:file:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+								disabled={isStreaming || isAddingAttachments}
+								id="chat-attachment-input"
+								multiple
+								onchange={(event) => {
+									const input = event.currentTarget as HTMLInputElement;
+
+									void addAttachments(Array.from(input.files ?? []));
+									input.value = '';
+								}}
+								type="file"
+							/>
+
+							<p class="mt-2 text-xs text-muted-foreground" id="chat-attachment-help">
+								Images and text/code files · 4 MB per file · 6 MB total.
+							</p>
+
+							<p aria-live="polite" class="text-sm">
+								{isAddingAttachments ? 'Reading attachments…' : ''}
+							</p>
+						</div>
+
 						{#if pendingAttachments.length}
 							<div aria-live="polite" class="flex flex-wrap gap-2">
 								{#each pendingAttachments as attachment (attachment.id)}
@@ -1166,28 +1197,13 @@
 						{/if}
 
 						<div class="flex gap-2">
-							<input
-								accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
-								aria-hidden="true"
-								class="sr-only"
-								disabled={isStreaming || isAddingAttachments}
-								id="chat-attachment-input"
-								multiple
-								tabindex="-1"
-								onchange={(event) => {
-									const input = event.currentTarget as HTMLInputElement;
-
-									void addAttachments(Array.from(input.files ?? []));
-									input.value = '';
-								}}
-								type="file"
-							/>
-
 							<button
+								aria-controls="chat-attachment-picker"
+								aria-expanded={showAttachmentPicker}
 								aria-label="Attach files"
-								class="btn btn-ghost self-end"
+								class="inline-flex min-h-11 shrink-0 items-center justify-center self-end rounded-md border border-border bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground shadow-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
 								disabled={isStreaming || isAddingAttachments}
-								onclick={openAttachmentPicker}
+								onclick={() => (showAttachmentPicker = !showAttachmentPicker)}
 								type="button">Attach</button
 							>
 

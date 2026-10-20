@@ -190,6 +190,9 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Length", str(candidate.stat().st_size))
         self.send_header("Content-Type", content_type)
+        if not candidate.relative_to(self.static_dir).as_posix().startswith("_app/immutable/"):
+            # Revalidate the HTML shell and worker so rebuilds reach existing tabs.
+            self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         if self.command != "HEAD":
             with candidate.open("rb") as file:

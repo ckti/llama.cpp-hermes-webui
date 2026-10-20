@@ -52,6 +52,32 @@ address and port with `HERMES_UI_HOST` and `HERMES_UI_PORT`, or use the matching
 command-line options. Keep it on loopback unless you deliberately place a
 trusted authentication and TLS layer in front of it.
 
+### Remote access and file dialogs
+
+When running the browser itself remotely with SSH X forwarding, Linux desktop
+portals can send the native file dialog to the remote desktop instead of the
+forwarded display. The webpage cannot choose that display.
+
+- **LibreWolf/Firefox:** open `about:config` and set
+  `widget.use-xdg-desktop-portal.file-picker` to `0` to use the GTK picker
+  (see [Mozilla's guidance](https://bugzilla.mozilla.org/show_bug.cgi?id=2026210#c2)).
+  Reset this preference when returning to a normal desktop session if desired.
+- **Chrome:** from the SSH shell with X forwarding, start a separate D-Bus
+  session and browser profile so the chooser shares the forwarded display:
+
+  ```bash
+  hermes_chrome_profile=$(mktemp -d -t hermes-chrome-x11.XXXXXX)
+  dbus-run-session -- google-chrome --user-data-dir="$hermes_chrome_profile" http://localhost:8788
+  ```
+
+  The separate profile prevents Chrome from reusing a browser process attached
+  to another desktop session. Enter the Gateway API key again in this profile.
+
+Both approaches still select files on the machine running the remote browser.
+Alternatively, to select files from your own computer, forward the UI port with
+`ssh -N -L 18788:127.0.0.1:8788 user@remote-host` and open
+`http://127.0.0.1:18788` in a local browser.
+
 ## Hermes API integration
 
 The browser calls documented Hermes endpoints only:
@@ -65,6 +91,8 @@ The browser calls documented Hermes endpoints only:
 The composer accepts image and text/code attachments. Images are sent as inline image content and
 text files are included in the message with their filename; PDF, audio, video, and other binary
 uploads are not offered because Gateway's session-chat API does not support document uploads.
+Click **Attach** to open the attachments panel, then use **Choose files** or drag files into
+the panel. Selected files appear above the message, where they can be removed before sending.
 
 `hermes_bridge.py` serves the static build and transparently forwards `/api/*`,
 `/v1/*`, and `/health` to Gateway on the same origin. It does not translate,

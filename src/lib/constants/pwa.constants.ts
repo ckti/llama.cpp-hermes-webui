@@ -318,12 +318,17 @@ export const SVELTEKIT_PWA_OPTIONS: SvelteKitPWAOptions = {
 
 	// Workbox configuration for generateSW strategy
 	workbox: {
+		// Earlier UI builds registered a worker that can still control open tabs.
+		// Activate rebuilt assets without waiting for every old tab to close.
+		// Do not force a page reload: drafts and running chats stay intact until
+		// the user refreshes.
+		clientsClaim: true,
 		// Match all static assets in the build output.
 		// Uses '**/' because SvelteKit outputs files under _app/immutable/
 		// subdirectories.
 		globPatterns: GLOB_PATTERNS,
-		maximumFileSizeToCacheInBytes: CACHE_SETTINGS.MAX_FILE_SIZE_BYTES,
 
+		maximumFileSizeToCacheInBytes: CACHE_SETTINGS.MAX_FILE_SIZE_BYTES,
 		// Prevent @vite-pwa/sveltekit from auto-adding a NavigationRoute by
 		// setting navigateFallback to empty string. This keeps the service
 		// worker from intercepting direct browser navigation to server API
@@ -356,6 +361,8 @@ export const SVELTEKIT_PWA_OPTIONS: SvelteKitPWAOptions = {
 				},
 				urlPattern: API_CACHING_PATTERNS.STATIC_API
 			}
-		]
+		],
+
+		skipWaiting: true
 	}
 };
