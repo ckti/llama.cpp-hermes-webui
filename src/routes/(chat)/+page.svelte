@@ -1111,22 +1111,6 @@
 							sendMessage();
 						}}
 					>
-						<input
-							accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
-							aria-label="Attach files"
-							class="sr-only"
-							disabled={isStreaming || isAddingAttachments}
-							id="chat-attachment-input"
-							multiple
-							onchange={(event) => {
-								const input = event.currentTarget as HTMLInputElement;
-
-								void addAttachments(Array.from(input.files ?? []));
-								input.value = '';
-							}}
-							type="file"
-						/>
-
 						{#if pendingAttachments.length}
 							<div aria-live="polite" class="flex flex-wrap gap-2">
 								{#each pendingAttachments as attachment (attachment.id)}
@@ -1164,12 +1148,28 @@
 						{/if}
 
 						<div class="flex gap-2">
-							<label
-								class:btn-disabled={isStreaming || isAddingAttachments}
-								aria-label="Attach files"
-								class="btn btn-ghost self-end"
-								for="chat-attachment-input">Attach</label
-							>
+							<div class="relative self-end">
+								<span
+									class:btn-disabled={isStreaming || isAddingAttachments}
+									class="btn btn-ghost pointer-events-none">Attach</span
+								>
+
+								{#if !isStreaming && !isAddingAttachments}
+									<input
+										accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
+										aria-label="Attach files"
+										class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+										multiple
+										onchange={(event) => {
+											const input = event.currentTarget as HTMLInputElement;
+
+											void addAttachments(Array.from(input.files ?? []));
+											input.value = '';
+										}}
+										type="file"
+									/>
+								{/if}
+							</div>
 
 							<textarea
 								bind:value={prompt}
