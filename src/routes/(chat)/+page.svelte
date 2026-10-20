@@ -218,6 +218,24 @@
 		});
 	}
 
+	function openAttachmentPicker(): void {
+		const input = document.getElementById('chat-attachment-input');
+
+		if (!(input instanceof HTMLInputElement)) return;
+
+		try {
+			if (typeof input.showPicker === 'function') {
+				input.showPicker();
+
+				return;
+			}
+		} catch {
+			// Older browsers can reject showPicker(), but still allow an input click.
+		}
+
+		input.click();
+	}
+
 	async function addAttachments(files: File[]): Promise<void> {
 		if (!files.length || isStreaming || isAddingAttachments) return;
 
@@ -1148,28 +1166,29 @@
 						{/if}
 
 						<div class="flex gap-2">
-							<div class="relative self-end">
-								<span
-									class:btn-disabled={isStreaming || isAddingAttachments}
-									class="btn btn-ghost pointer-events-none">Attach</span
-								>
+							<input
+								accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
+								aria-label="Attach files"
+								class="sr-only"
+								disabled={isStreaming || isAddingAttachments}
+								id="chat-attachment-input"
+								multiple
+								onchange={(event) => {
+									const input = event.currentTarget as HTMLInputElement;
 
-								{#if !isStreaming && !isAddingAttachments}
-									<input
-										accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
-										aria-label="Attach files"
-										class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-										multiple
-										onchange={(event) => {
-											const input = event.currentTarget as HTMLInputElement;
+									void addAttachments(Array.from(input.files ?? []));
+									input.value = '';
+								}}
+								type="file"
+							/>
 
-											void addAttachments(Array.from(input.files ?? []));
-											input.value = '';
-										}}
-										type="file"
-									/>
-								{/if}
-							</div>
+							<button
+								aria-label="Attach files"
+								class="btn btn-ghost self-end"
+								disabled={isStreaming || isAddingAttachments}
+								onclick={openAttachmentPicker}
+								type="button">Attach</button
+							>
 
 							<textarea
 								bind:value={prompt}
