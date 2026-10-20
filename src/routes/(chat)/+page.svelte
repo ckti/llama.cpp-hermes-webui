@@ -206,6 +206,19 @@
 		return textFileExtensions.has(extension);
 	}
 
+	function attachmentReadError(file: File, cause: unknown): string {
+		const message = cause instanceof Error ? cause.message : '';
+
+		if (
+			(cause instanceof DOMException && cause.name === 'NotFoundError') ||
+			message.includes('requested file or directory could not be found')
+		) {
+			return `${file.name} could not be read after it was selected. The browser returned an unavailable file path. If the browser runs over SSH, disable its desktop-portal file picker and try again.`;
+		}
+
+		return message || `Could not add ${file.name}.`;
+	}
+
 	function readFileAsDataUrl(file: File): Promise<string> {
 		return new Promise((resolve, reject) => {
 			const reader = new FileReader();
@@ -290,7 +303,7 @@
 
 					rejected.push(`${file.name} is not an image or text/code file.`);
 				} catch (cause) {
-					rejected.push(cause instanceof Error ? cause.message : `Could not add ${file.name}.`);
+					rejected.push(attachmentReadError(file, cause));
 				}
 			}
 

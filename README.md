@@ -62,12 +62,15 @@ forwarded display. The webpage cannot choose that display.
   `widget.use-xdg-desktop-portal.file-picker` to `0` to use the GTK picker
   (see [Mozilla's guidance](https://bugzilla.mozilla.org/show_bug.cgi?id=2026210#c2)).
   Reset this preference when returning to a normal desktop session if desired.
-- **Chrome:** from the SSH shell with X forwarding, start a separate D-Bus
-  session and browser profile so the chooser shares the forwarded display:
+- **Chrome:** from the SSH shell with X forwarding, start a separate browser
+  profile with no desktop-portal bus. This makes Chrome use its native picker
+  on the forwarded display and avoids temporary portal paths that disappear
+  before Chrome can read them:
 
   ```bash
   hermes_chrome_profile=$(mktemp -d -t hermes-chrome-x11.XXXXXX)
-  dbus-run-session -- google-chrome --user-data-dir="$hermes_chrome_profile" http://localhost:8788
+  DBUS_SESSION_BUS_ADDRESS="unix:path=$hermes_chrome_profile/no-session-bus" \
+    google-chrome --user-data-dir="$hermes_chrome_profile" http://localhost:8788
   ```
 
   The separate profile prevents Chrome from reusing a browser process attached
