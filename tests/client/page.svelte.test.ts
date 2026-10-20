@@ -84,7 +84,7 @@ describe('/+page.svelte', () => {
 
 		await screen.getByPlaceholder('Hermes API key').fill('test-api-key');
 		await screen.getByRole('button', { name: 'Connect' }).click();
-		await expect.element(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+		await expect.element(screen.getByText('Attach', { exact: true })).toBeVisible();
 
 		const input = screen.container.querySelector('input[type="file"]');
 

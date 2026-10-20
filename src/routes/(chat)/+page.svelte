@@ -131,7 +131,6 @@
 	let pendingAttachments = $state<PendingAttachment[]>([]);
 	let isAddingAttachments = $state(false);
 	let streamController: AbortController | null = null;
-	let attachmentInput = $state<HTMLInputElement | undefined>(undefined);
 
 	let activeSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
 	let selectedModel = $derived(
@@ -1113,10 +1112,11 @@
 						}}
 					>
 						<input
-							bind:this={attachmentInput}
 							accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
-							class="hidden"
+							aria-label="Attach files"
+							class="sr-only"
 							disabled={isStreaming || isAddingAttachments}
+							id="chat-attachment-input"
 							multiple
 							onchange={(event) => {
 								const input = event.currentTarget as HTMLInputElement;
@@ -1164,12 +1164,11 @@
 						{/if}
 
 						<div class="flex gap-2">
-							<button
+							<label
+								class:btn-disabled={isStreaming || isAddingAttachments}
 								aria-label="Attach files"
 								class="btn btn-ghost self-end"
-								disabled={isStreaming || isAddingAttachments}
-								onclick={() => attachmentInput?.click()}
-								type="button">Attach</button
+								for="chat-attachment-input">Attach</label
 							>
 
 							<textarea
