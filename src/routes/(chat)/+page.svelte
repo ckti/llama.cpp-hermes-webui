@@ -1168,11 +1168,12 @@
 						<div class="flex gap-2">
 							<input
 								accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
-								aria-label="Attach files"
+								aria-hidden="true"
 								class="sr-only"
 								disabled={isStreaming || isAddingAttachments}
 								id="chat-attachment-input"
 								multiple
+								tabindex="-1"
 								onchange={(event) => {
 									const input = event.currentTarget as HTMLInputElement;
 

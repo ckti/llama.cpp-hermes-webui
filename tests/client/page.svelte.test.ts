@@ -66,11 +66,13 @@ describe('/+page.svelte', () => {
 
 		await screen.getByPlaceholder('Hermes API key').fill('test-api-key');
 		await screen.getByRole('button', { name: 'Connect' }).click();
-		await expect.element(screen.getByRole('button', { name: 'New chat' })).toBeVisible();
+		const newChatButton = screen.getByRole('button', { name: 'New chat', exact: true });
 
-		await screen.getByRole('button', { name: 'New chat' }).click();
+		await expect.element(newChatButton).toBeVisible();
+
+		await newChatButton.click();
 		await expect.poll(() => createdSessionBodies.length).toBe(1);
-		await screen.getByRole('button', { name: 'New chat' }).click();
+		await newChatButton.click();
 		await expect.poll(() => createdSessionBodies.length).toBe(2);
 
 		expect(createdSessionBodies).toEqual([
