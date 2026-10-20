@@ -27,6 +27,18 @@
 		pending?: boolean;
 	};
 
+	type PendingAttachment = {
+		id: string;
+		kind: 'image' | 'text';
+		name: string;
+		size: number;
+		value: string;
+	};
+
+	type GatewayContentPart =
+		| { type: 'text'; text: string }
+		| { type: 'image_url'; image_url: { url: string } };
+
 	type PendingApproval = {
 		runId: string;
 		requestId?: string;
@@ -52,6 +64,54 @@
 
 	const apiKeyStorageKey = 'hermes-gateway-ui.api-key';
 	const sessionKeyStorageKey = 'hermes-gateway-ui.session-keys';
+	const maxAttachmentBytes = 4 * 1024 * 1024;
+	const maxTotalAttachmentBytes = 6 * 1024 * 1024;
+	const maxTextAttachmentCharacters = 60_000;
+	const textFileExtensions = new Set([
+		'bash',
+		'c',
+		'cfg',
+		'cpp',
+		'cs',
+		'css',
+		'csv',
+		'go',
+		'h',
+		'html',
+		'htm',
+		'ini',
+		'java',
+		'js',
+		'json',
+		'jsonl',
+		'jsx',
+		'log',
+		'md',
+		'markdown',
+		'py',
+		'rb',
+		'rs',
+		'sh',
+		'sql',
+		'toml',
+		'ts',
+		'tsv',
+		'tsx',
+		'txt',
+		'xml',
+		'yaml',
+		'yml',
+		'zsh'
+	]);
+	const textMimeTypes = new Set([
+		'application/javascript',
+		'application/json',
+		'application/sql',
+		'application/typescript',
+		'application/x-sh',
+		'application/xml',
+		'application/x-yaml'
+	]);
 
 	let apiKey = $state('');
 	let isConnected = $state(false);
@@ -68,7 +128,10 @@
 	let activity = $state<string[]>([]);
 	let pendingApproval = $state<PendingApproval | null>(null);
 	let sessionKeys = $state<Record<string, string>>({});
+	let pendingAttachments = $state<PendingAttachment[]>([]);
+	let isAddingAttachments = $state(false);
 	let streamController: AbortController | null = null;
+	let attachmentInput = $state<HTMLInputElement | undefined>(undefined);
 
 	let activeSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
 	let selectedModel = $derived(
@@ -83,15 +146,21 @@
 				.map((part) => {
 					if (typeof part === 'string') return part;
 
-					if (part && typeof part === 'object' && 'text' in part) {
-						const text = (part as { text?: unknown }).text;
+					if (part && typeof part === 'object') {
+						const contentPart = part as { text?: unknown; type?: unknown };
+
+						if (contentPart.type === 'image_url' || contentPart.type === 'input_image') {
+							return '[Image attachment]';
+						}
+
+						const text = contentPart.text;
 
 						return typeof text === 'string' ? text : '';
 					}
 
 					return '';
 				})
-				.join('');
+				.join('\n');
 		}
 
 		if (content == null) return '';
@@ -119,6 +188,154 @@
 
 	function createSessionKey(): string {
 		return `hermes-webui:${crypto.randomUUID()}`;
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+
+		if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+
+		return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
+	}
+
+	function isTextAttachment(file: File): boolean {
+		if (file.type.startsWith('text/') || textMimeTypes.has(file.type)) return true;
+
+		const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+
+		return textFileExtensions.has(extension);
+	}
+
+	function readFileAsDataUrl(file: File): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+
+			reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}.`));
+			reader.onload = () =>
+				typeof reader.result === 'string'
+					? resolve(reader.result)
+					: reject(new Error(`Could not read ${file.name}.`));
+			reader.readAsDataURL(file);
+		});
+	}
+
+	async function addAttachments(files: File[]): Promise<void> {
+		if (!files.length || isStreaming || isAddingAttachments) return;
+
+		error = '';
+		isAddingAttachments = true;
+		const additions: PendingAttachment[] = [];
+		const rejected: string[] = [];
+
+		let totalBytes = pendingAttachments.reduce((total, attachment) => total + attachment.size, 0);
+
+		try {
+			for (const file of files) {
+				if (file.size > maxAttachmentBytes) {
+					rejected.push(`${file.name} is larger than ${formatFileSize(maxAttachmentBytes)}.`);
+
+					continue;
+				}
+
+				if (totalBytes + file.size > maxTotalAttachmentBytes) {
+					rejected.push(
+						`Attachments are limited to ${formatFileSize(maxTotalAttachmentBytes)} per message.`
+					);
+
+					continue;
+				}
+
+				try {
+					if (file.type.startsWith('image/')) {
+						additions.push({
+							id: crypto.randomUUID(),
+							kind: 'image',
+							name: file.name,
+							size: file.size,
+							value: await readFileAsDataUrl(file)
+						});
+						totalBytes += file.size;
+
+						continue;
+					}
+
+					if (isTextAttachment(file)) {
+						const text = await file.text();
+
+						if (!text.trim()) {
+							rejected.push(`${file.name} is empty.`);
+
+							continue;
+						}
+
+						if (text.length > maxTextAttachmentCharacters) {
+							rejected.push(
+								`${file.name} exceeds the ${Math.round(maxTextAttachmentCharacters / 1000)} KB text limit.`
+							);
+
+							continue;
+						}
+
+						additions.push({
+							id: crypto.randomUUID(),
+							kind: 'text',
+							name: file.name,
+							size: file.size,
+							value: text
+						});
+						totalBytes += file.size;
+
+						continue;
+					}
+
+					rejected.push(`${file.name} is not an image or text/code file.`);
+				} catch (cause) {
+					rejected.push(cause instanceof Error ? cause.message : `Could not add ${file.name}.`);
+				}
+			}
+
+			if (additions.length) pendingAttachments = [...pendingAttachments, ...additions];
+
+			if (rejected.length) error = rejected.join(' ');
+		} finally {
+			isAddingAttachments = false;
+		}
+	}
+
+	function removeAttachment(id: string): void {
+		pendingAttachments = pendingAttachments.filter((attachment) => attachment.id !== id);
+	}
+
+	function chatInput(
+		input: string,
+		attachments: PendingAttachment[]
+	): string | GatewayContentPart[] {
+		if (!attachments.length) return input;
+
+		const parts: GatewayContentPart[] = [];
+
+		if (input) parts.push({ text: input, type: 'text' });
+
+		for (const attachment of attachments) {
+			if (attachment.kind === 'image') {
+				parts.push({ image_url: { url: attachment.value }, type: 'image_url' });
+			} else {
+				parts.push({
+					text: `Attached file: ${attachment.name}\n\n${attachment.value}`,
+					type: 'text'
+				});
+			}
+		}
+
+		return parts;
+	}
+
+	function userMessageText(input: string, attachments: PendingAttachment[]): string {
+		const labels = attachments.map(
+			(attachment) => `[Attached ${attachment.kind}: ${attachment.name}]`
+		);
+
+		return [input, ...labels].filter(Boolean).join('\n\n');
 	}
 
 	function sessionKeyFor(sessionId: string): string {
@@ -469,9 +686,11 @@
 	async function sendMessage(): Promise<void> {
 		const input = prompt.trim();
 
-		if (!input || isStreaming) return;
+		if ((!input && pendingAttachments.length === 0) || isStreaming || isAddingAttachments) return;
 
 		error = '';
+		const attachments = pendingAttachments;
+
 		let sessionId = activeSessionId;
 
 		if (!sessionId) {
@@ -486,16 +705,25 @@
 
 		messages = [
 			...messages,
-			{ content: input, id: `local-${crypto.randomUUID()}`, role: 'user' },
+			{
+				content: userMessageText(input, attachments),
+				id: `local-${crypto.randomUUID()}`,
+				role: 'user'
+			},
 			{ content: '', id: assistantId, pending: true, role: 'assistant' }
 		];
 		prompt = '';
+		pendingAttachments = [];
 		isStreaming = true;
 		activity = [];
 		streamController = new AbortController();
 
 		try {
-			const body: Record<string, string> = { input };
+			const body: {
+				input: string | GatewayContentPart[];
+				model?: string;
+				provider?: string;
+			} = { input: chatInput(input, attachments) };
 
 			if (selectedModel) {
 				body.model = selectedModel.model;
@@ -878,32 +1106,110 @@
 					{/if}
 
 					<form
-						class="flex gap-2 border-t border-base-300 p-3"
+						class="flex flex-col gap-2 border-t border-base-300 p-3"
 						onsubmit={(event) => {
 							event.preventDefault();
 							sendMessage();
 						}}
 					>
-						<textarea
-							bind:value={prompt}
-							class="textarea textarea-bordered min-h-12 flex-1"
-							disabled={isStreaming}
-							onkeydown={(event) => {
-								if (event.key === 'Enter' && !event.shiftKey) {
-									event.preventDefault();
-									sendMessage();
-								}
-							}}
-							placeholder="Message Hermes…"
-						></textarea>
+						<input
+							bind:this={attachmentInput}
+							accept="image/*,text/*,.bash,.c,.cfg,.cpp,.cs,.go,.h,.html,.htm,.ini,.java,.js,.json,.jsonl,.jsx,.log,.md,.markdown,.py,.rb,.rs,.sh,.sql,.toml,.ts,.tsv,.tsx,.xml,.yaml,.yml,.zsh"
+							class="hidden"
+							disabled={isStreaming || isAddingAttachments}
+							multiple
+							onchange={(event) => {
+								const input = event.currentTarget as HTMLInputElement;
 
-						{#if isStreaming}
-							<button class="btn btn-warning self-end" onclick={stopRun} type="button">Stop</button>
-						{:else}
-							<button class="btn btn-primary self-end" disabled={!prompt.trim()} type="submit"
-								>Send</button
-							>
+								void addAttachments(Array.from(input.files ?? []));
+								input.value = '';
+							}}
+							type="file"
+						/>
+
+						{#if pendingAttachments.length}
+							<div aria-live="polite" class="flex flex-wrap gap-2">
+								{#each pendingAttachments as attachment (attachment.id)}
+									<div
+										class="flex max-w-full items-center gap-2 rounded-box border border-base-300 bg-base-200 px-2 py-1"
+									>
+										{#if attachment.kind === 'image'}
+											<img
+												alt={`Preview of ${attachment.name}`}
+												class="h-9 w-9 rounded object-cover"
+												src={attachment.value}
+											/>
+										{/if}
+
+										<span class="min-w-0 text-xs">
+											<span class="block truncate font-medium">{attachment.name}</span>
+
+											<span class="block opacity-60"
+												>{attachment.kind === 'image' ? 'Image' : 'Text'} · {formatFileSize(
+													attachment.size
+												)}</span
+											>
+										</span>
+
+										<button
+											aria-label={`Remove ${attachment.name}`}
+											class="btn btn-ghost btn-xs"
+											disabled={isStreaming}
+											onclick={() => removeAttachment(attachment.id)}
+											type="button">×</button
+										>
+									</div>
+								{/each}
+							</div>
 						{/if}
+
+						<div class="flex gap-2">
+							<button
+								aria-label="Attach files"
+								class="btn btn-ghost self-end"
+								disabled={isStreaming || isAddingAttachments}
+								onclick={() => attachmentInput?.click()}
+								type="button">Attach</button
+							>
+
+							<textarea
+								bind:value={prompt}
+								class="textarea textarea-bordered min-h-12 flex-1"
+								disabled={isStreaming || isAddingAttachments}
+								onkeydown={(event) => {
+									if (event.key === 'Enter' && !event.shiftKey) {
+										event.preventDefault();
+										sendMessage();
+									}
+								}}
+								onpaste={(event) => {
+									const files = Array.from(event.clipboardData?.files ?? []);
+
+									if (files.length) {
+										event.preventDefault();
+										void addAttachments(files);
+									}
+								}}
+								placeholder="Message Hermes…"
+							></textarea>
+
+							{#if isStreaming}
+								<button class="btn btn-warning self-end" onclick={stopRun} type="button"
+									>Stop</button
+								>
+							{:else}
+								<button
+									class="btn btn-primary self-end"
+									disabled={!prompt.trim() && pendingAttachments.length === 0}
+									type="submit">Send</button
+								>
+							{/if}
+						</div>
+
+						<p class="text-xs opacity-60">
+							Attach images or text/code files. Images are sent inline; text files are added to your
+							message.
+						</p>
 					</form>
 				</section>
 			</section>

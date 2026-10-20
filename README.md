@@ -62,6 +62,10 @@ The browser calls documented Hermes endpoints only:
 - `POST /api/sessions/{id}/chat/stream` for Server-Sent Event chat streaming.
 - `/v1/runs/{id}/stop` and `/v1/runs/{id}/approval` for active-run controls.
 
+The composer accepts image and text/code attachments. Images are sent as inline image content and
+text files are included in the message with their filename; PDF, audio, video, and other binary
+uploads are not offered because Gateway's session-chat API does not support document uploads.
+
 `hermes_bridge.py` serves the static build and transparently forwards `/api/*`,
 `/v1/*`, and `/health` to Gateway on the same origin. It does not translate,
 store, or log the API key. Branching uses Hermes's native session fork and

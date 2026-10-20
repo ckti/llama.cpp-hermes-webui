@@ -4,9 +4,11 @@ import { render } from 'vitest-browser-svelte';
 
 describe('/+page.svelte', () => {
 	const createdSessionBodies: Record<string, unknown>[] = [];
+	const chatRequestBodies: Record<string, unknown>[] = [];
 
 	beforeEach(() => {
 		createdSessionBodies.length = 0;
+		chatRequestBodies.length = 0;
 		localStorage.clear();
 
 		vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
@@ -24,12 +26,28 @@ describe('/+page.svelte', () => {
 				return Response.json({ data: [] });
 			}
 
+			if (url === '/api/sessions/session-1/messages?order=oldest') {
+				return Response.json({ data: [] });
+			}
+
 			if (url === '/api/sessions' && init?.method === 'POST') {
 				const body = JSON.parse(String(init.body)) as Record<string, unknown>;
 
 				createdSessionBodies.push(body);
 
 				return Response.json({ session: { id: `session-${createdSessionBodies.length}` } });
+			}
+
+			if (url === '/api/sessions/session-1/chat/stream' && init?.method === 'POST') {
+				chatRequestBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.close();
+						}
+					})
+				);
 			}
 
 			throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${url}`);
@@ -59,5 +77,36 @@ describe('/+page.svelte', () => {
 			{ source: 'hermes_gateway_ui' },
 			{ source: 'hermes_gateway_ui' }
 		]);
+	});
+
+	it('sends an attached image as a Gateway image content part', async () => {
+		const screen = await render(TestWrapper);
+
+		await screen.getByPlaceholder('Hermes API key').fill('test-api-key');
+		await screen.getByRole('button', { name: 'Connect' }).click();
+		await expect.element(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+
+		const input = screen.container.querySelector('input[type="file"]');
+
+		if (!(input instanceof HTMLInputElement)) throw new Error('Attachment input was not rendered.');
+
+		const files = new DataTransfer();
+
+		files.items.add(new File(['image data'], 'reference.png', { type: 'image/png' }));
+		Object.defineProperty(input, 'files', { configurable: true, value: files.files });
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+
+		await expect.element(screen.getByText('reference.png')).toBeVisible();
+		await screen.getByRole('button', { name: 'Send' }).click();
+		await expect.poll(() => chatRequestBodies.length).toBe(1);
+
+		expect(chatRequestBodies[0]).toMatchObject({
+			input: [
+				{
+					image_url: { url: expect.stringMatching(/^data:image\/png;base64,/) },
+					type: 'image_url'
+				}
+			]
+		});
 	});
 });
