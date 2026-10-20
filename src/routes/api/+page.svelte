@@ -270,7 +270,7 @@
 			tags: ['Sessions']
 		}),
 		documentedOperation('post', '/api/sessions', 'Create session', {
-			bodyExample: { source: 'hermes_gateway_ui', title: 'New session' },
+			bodyExample: { source: 'hermes_gateway_ui' },
 			tags: ['Sessions']
 		}),
 		documentedOperation('get', '/api/sessions/{session_id}', 'Get session', {

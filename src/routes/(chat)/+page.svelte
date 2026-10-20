@@ -304,7 +304,10 @@
 	async function createSession(): Promise<HermesSession | null> {
 		error = '';
 		try {
-			const body: Record<string, string> = { source: 'hermes_gateway_ui', title: 'New chat' };
+			// "New chat" is only a UI placeholder. Sending it as a stored title makes
+			// each new session collide with the Gateway's unique-title constraint and
+			// prevents Hermes from replacing it with an automatic summary.
+			const body: Record<string, string> = { source: 'hermes_gateway_ui' };
 
 			if (selectedModel) {
 				body.model = selectedModel.model;
@@ -752,7 +755,7 @@
 							>
 								<span class="min-w-0">
 									<span class="block truncate font-medium"
-										>{session.title || session.preview || 'Untitled session'}</span
+										>{session.title || session.preview || 'New chat'}</span
 									>
 
 									<span class="block truncate text-xs opacity-60"
@@ -770,7 +773,7 @@
 					<div class="flex flex-wrap items-center gap-2 border-b border-base-300 p-3">
 						<div class="mr-auto min-w-0">
 							<h2 class="truncate font-semibold">
-								{activeSession?.title || activeSession?.preview || 'New Hermes chat'}
+								{activeSession?.title || activeSession?.preview || 'New chat'}
 							</h2>
 
 							<p class="text-xs opacity-60">
