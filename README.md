@@ -52,6 +52,38 @@ address and port with `HERMES_UI_HOST` and `HERMES_UI_PORT`, or use the matching
 command-line options. Keep it on loopback unless you deliberately place a
 trusted authentication and TLS layer in front of it.
 
+### Local long-term memory
+
+`npm run serve` also starts a local SQLite long-term-memory backend. It stores
+notes in `$XDG_STATE_HOME/hermes-gateway-ui/memory.sqlite3` (or
+`~/.local/state/hermes-gateway-ui/memory.sqlite3` when `XDG_STATE_HOME` is not
+set). Set `HERMES_UI_MEMORY_DB` or pass `--memory-db` to select another path.
+The database uses WAL mode and is created with user-only filesystem permissions.
+
+Memory is scoped to the opaque `X-Hermes-Session-Key` already created for each
+chat. The database stores only a hash of that key, so memories from one chat
+are not returned in another one. Before a session-chat request reaches Gateway,
+the bridge performs a bounded SQLite FTS search and adds matching notes as
+explicitly labelled, untrusted context. This needs no Gateway configuration.
+
+By default, automatic capture is conservative: only a successful prompt that
+contains **remember**, **memorize**, **note**, or **save** is retained. Choose a
+different policy with `HERMES_UI_MEMORY_CAPTURE=off|explicit|all` or
+`--memory-capture`; `all` retains every successful text prompt and should only
+be used when that is appropriate for the user. Images are never retained.
+
+The bridge exposes a same-origin CRUD API for a memory UI or integration:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/local-memory?q=…&limit=…` | Search (or list when `q` is omitted) memories for the supplied chat key. |
+| `POST` | `/api/local-memory` | Create a memory with `content`, plus optional `metadata`, `role`, and `source_session_id`. |
+| `GET`, `PATCH`, `DELETE` | `/api/local-memory/{id}` | Read, edit, or remove one memory. |
+
+Every memory endpoint requires the matching `X-Hermes-Session-Key` header.
+These routes are served by `hermes_bridge.py`, not Gateway, so use
+`npm run serve` for local-memory development rather than the direct Vite proxy.
+
 ### Remote access and file dialogs
 
 When running the browser itself remotely with SSH X forwarding, Linux desktop
@@ -113,6 +145,7 @@ before Gateway receives them.
 
 For each native chat session, the UI also creates an opaque local
 `X-Hermes-Session-Key`. This is distinct from the transcript session ID and
-gives Hermes a stable, isolated scope for long-term memory in that chat.
+gives both Hermes and the bridge's SQLite backend a stable, isolated scope for
+long-term memory in that chat.
 
 See [UPSTREAM.md](UPSTREAM.md) for the imported source revision.
